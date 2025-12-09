@@ -1,89 +1,72 @@
-{\rtf1\ansi\ansicpg1252\cocoartf2818
-\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
-{\colortbl;\red255\green255\blue255;}
-{\*\expandedcolortbl;;}
-\paperw11900\paperh16840\margl1440\margr1440\vieww28300\viewh15160\viewkind0
-\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+-- ============================================
+--     FACT TABLE: VENTAS
+-- ============================================
 
-\f0\fs24 \cf0 \'97Agregaciones a la base de datos \
-\
-CREATE TABLE IF NOT EXISTS dim_customer (\
-    customer_key SERIAL PRIMARY KEY,\
-    customerid INTEGER UNIQUE,\
-    firstname VARCHAR(100),\
-    lastname VARCHAR(100),\
-    email VARCHAR(255),\
-    phone VARCHAR(50),\
-    city VARCHAR(100),\
-    country VARCHAR(100)\
-);\
- \
-CREATE TABLE IF NOT EXISTS dim_product (\
-    product_key SERIAL PRIMARY KEY,\
-    productid INTEGER UNIQUE,\
-    productname VARCHAR(150),\
-    category VARCHAR(100),\
-    price DECIMAL(18,2),\
-    stock INTEGER\
-);\
-\
-CREATE TABLE IF NOT EXISTS dim_order (\
-    order_key SERIAL PRIMARY KEY,\
-    orderid INTEGER UNIQUE,\
-    customerid INTEGER,\
-    orderdate DATE,\
-    status VARCHAR(50)\
-);\
-\
-CREATE TABLE IF NOT EXISTS dim_date (\
-    date_key SERIAL PRIMARY KEY,\
-    full_date DATE UNIQUE,\
-    day INTEGER,\
-    month INTEGER,\
-    year INTEGER,\
-    quarter INTEGER\
-);\
-\
-TRUNCATE dim_customer RESTART IDENTITY;\
-TRUNCATE dim_product RESTART IDENTITY;\
-TRUNCATE dim_order RESTART IDENTITY;\
-TRUNCATE dim_date RESTART IDENTITY;\
-\
-SELECT customer_key,\
-       customerid,\
-       firstname || ' ' || lastname AS fullname,\
-       email,\
-       country\
-FROM dim_customer\
-ORDER BY customer_key\
-LIMIT 10;\
-\
-SELECT product_key,\
-       productid,\
-       productname,\
-       category,\
-       price\
-FROM dim_product\
-ORDER BY product_key\
-LIMIT 10;\
-\
-SELECT order_key,\
-       orderid,\
-       customerid,\
-       orderdate,\
-       status\
-FROM dim_order\
-ORDER BY order_key\
-LIMIT 10;\
-\
-SELECT date_key,\
-       full_date,\
-       year,\
-       month,\
-       day,\
-       quarter\
-FROM dim_date\
-ORDER BY date_key\
-LIMIT 10;\
-\
-}
+CREATE TABLE fact_sales (
+    fact_id SERIAL PRIMARY KEY,
+    customer_key INT NOT NULL,
+    product_key INT NOT NULL,
+    order_key INT NOT NULL,
+    date_key INT NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(18,2) NOT NULL,
+    total_price DECIMAL(18,2) NOT NULL,
+    source VARCHAR(50),
+    load_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Foreign Keys
+    CONSTRAINT fk_customer FOREIGN KEY (customer_key) REFERENCES dim_customer(customer_key),
+    CONSTRAINT fk_product FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
+    CONSTRAINT fk_order FOREIGN KEY (order_key) REFERENCES dim_order(order_key),
+    CONSTRAINT fk_date FOREIGN KEY (date_key) REFERENCES dim_date(date_key)
+);
+
+CREATE OR REPLACE FUNCTION cleanup_fact_sales()
+RETURNS void AS $$
+BEGIN
+    TRUNCATE TABLE fact_sales RESTART IDENTITY;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT cleanup_fact_sales();
+
+CREATE OR REPLACE FUNCTION load_fact_sales()
+RETURNS void AS $$
+BEGIN
+    PERFORM cleanup_fact_sales();
+
+    INSERT INTO fact_sales (
+        customer_key, product_key, order_key, date_key,
+        quantity, unit_price, total_price, source
+    )
+    SELECT
+        c.customer_key,
+        p.product_key,
+        o.order_key,
+        d.date_key,
+        s.quantity,
+        s.price,
+        s.totalprice,
+        s.source
+    FROM staging_salesdata s
+    JOIN dim_customer c ON c.customerid = s.customerid
+    JOIN dim_product p ON p.productid = s.productid
+    JOIN dim_order   o ON o.orderid = s.orderid
+    JOIN dim_date d ON d.full_date = s.orderdate;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT * FROM fact_sales LIMIT 20;
+
+SELECT COUNT(*) FROM fact_sales;
+
+SELECT SUM(total_price) AS total_revenue FROM fact_sales;
+
+SELECT category, SUM(total_price) revenue
+FROM fact_sales f
+JOIN dim_product p ON p.product_key = f.product_key
+GROUP BY category
+ORDER BY revenue DESC;
+
+SELECT * FROM fact_sales LIMIT 20;
+SELECT COUNT(*) FROM fact_sales;
